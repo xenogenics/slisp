@@ -1,12 +1,8 @@
-use std::{ffi::CString, rc::Rc};
-
 use crate::{
     compiler::Artifacts,
     error::Error,
-    ffi::{self, Stub},
-    heap,
     opcodes::{Arity, Immediate, OpCode},
-    stack::{Stack, Value},
+    vm::{Stack, Value, ffi::Stub},
 };
 
 //
@@ -203,13 +199,13 @@ impl VirtualMachine {
                     //
                     // In case of a list, flatten it.
                     //
-                    Value::Heap(v) if v.is_pair() => {
-                        let values: Vec<_> = v.iter().collect();
+                    Value::Pair(..) => {
+                        let values: Vec<_> = val.iter().collect();
                         argcnt = values.len();
                         values
                             .into_iter()
                             .rev()
-                            .for_each(|v| self.stack.push(v.into()));
+                            .for_each(|v| self.stack.push(v.clone()));
                     }
                     //
                     // In case of NIL, ignore it.
@@ -333,84 +329,28 @@ impl VirtualMachine {
             //
             OpCode::Car => {
                 let result = match self.stack.pop() {
-                    Value::Heap(value) => match value.as_ref() {
-                        heap::Value::Pair(value, _) => value.clone().into(),
-                        _ => Immediate::Nil.into(),
-                    },
+                    Value::Pair(value, _) => value.as_ref().clone(),
                     _ => Immediate::Nil.into(),
                 };
                 self.stack.push(result);
             }
             OpCode::Cdr => {
                 let result = match self.stack.pop() {
-                    Value::Heap(value) => match value.as_ref() {
-                        heap::Value::Pair(_, value) => value.clone().into(),
-                        _ => Immediate::Nil.into(),
-                    },
+                    Value::Pair(_, value) => value.as_ref().clone(),
                     _ => Immediate::Nil.into(),
                 };
                 self.stack.push(result);
             }
             OpCode::Conc => match (self.stack.pop(), self.stack.pop()) {
-                (Value::Heap(a), b) => {
-                    let b = match b {
-                        Value::Closure(v) => Rc::new(heap::Value::Closure(v)),
-                        Value::Heap(v) => v,
-                        Value::Immediate(v) => Rc::new(heap::Value::Immediate(v)),
-                        _ => panic!("Return link cannot be pushed to the heap"),
-                    };
-                    self.stack.push(Value::Heap(heap::Value::conc(a, b)));
+                (a @ Value::Pair(..), b) => {
+                    let res = Value::conc(a.into(), b.into());
+                    self.stack.push(res);
                 }
                 (_, b) => self.stack.push(b),
             },
             OpCode::Cons => {
-                //
-                // Move the arguments to the heap.
-                //
-                let (a, b) = match (self.stack.pop(), self.stack.pop()) {
-                    (Value::Closure(a), Value::Closure(b)) => {
-                        let a = Rc::new(heap::Value::Closure(a));
-                        let b = Rc::new(heap::Value::Closure(b));
-                        (a, b)
-                    }
-                    (Value::Closure(a), Value::Heap(b)) => {
-                        let a = Rc::new(heap::Value::Closure(a));
-                        (a, b.clone())
-                    }
-                    (Value::Closure(a), Value::Immediate(b)) => {
-                        let a = Rc::new(heap::Value::Closure(a));
-                        let b = Rc::new(heap::Value::Immediate(b));
-                        (a, b)
-                    }
-                    (Value::Heap(a), Value::Closure(b)) => {
-                        let b = Rc::new(heap::Value::Closure(b));
-                        (a.clone(), b)
-                    }
-                    (Value::Heap(a), Value::Heap(b)) => (a.clone(), b.clone()),
-                    (Value::Heap(a), Value::Immediate(b)) => {
-                        let b = Rc::new(heap::Value::Immediate(b));
-                        (a.clone(), b)
-                    }
-                    (Value::Immediate(a), Value::Closure(b)) => {
-                        let a = Rc::new(heap::Value::Immediate(a));
-                        let b = Rc::new(heap::Value::Closure(b));
-                        (a, b)
-                    }
-                    (Value::Immediate(a), Value::Heap(b)) => {
-                        let a = Rc::new(heap::Value::Immediate(a));
-                        (a, b.clone())
-                    }
-                    (Value::Immediate(a), Value::Immediate(b)) => {
-                        let a = Rc::new(heap::Value::Immediate(a));
-                        let b = Rc::new(heap::Value::Immediate(b));
-                        (a, b)
-                    }
-                    _ => panic!("Return link cannot be pushed to the heap"),
-                };
-                //
-                // Build a pair and push the value.
-                //
-                let value = Value::Heap(Rc::new(heap::Value::Pair(a, b)));
+                let (a, b) = (self.stack.pop(), self.stack.pop());
+                let value = Value::Pair(a.into(), b.into());
                 self.stack.push(value);
             }
             //
@@ -418,26 +358,25 @@ impl VirtualMachine {
             //
             OpCode::Bytes => {
                 let value = match self.stack.pop() {
-                    Value::Heap(v) => {
+                    v @ Value::Pair(..) => {
                         //
                         // Collect the character elements of the list.
                         //
                         let bytes: Vec<_> = v
                             .iter()
-                            .filter_map(|v| match v.as_ref() {
-                                heap::Value::Immediate(Immediate::Char(v)) => Some(*v),
+                            .filter_map(|v| match v {
+                                Value::Immediate(Immediate::Char(v)) => Some(*v),
                                 _ => None,
                             })
                             .collect();
                         //
                         // Done.
                         //
-                        let bytes = bytes.into_boxed_slice();
-                        Value::Heap(Rc::new(heap::Value::Bytes(bytes)))
+                        Value::Bytes(bytes.into())
                     }
                     Value::Immediate(Immediate::Number(v)) => {
-                        let bytes = vec![0; v as usize].into_boxed_slice();
-                        Value::Heap(Rc::new(heap::Value::Bytes(bytes)))
+                        let bytes = vec![0; v as usize];
+                        Value::Bytes(bytes.into())
                     }
                     _ => Value::Immediate(Immediate::Nil),
                 };
@@ -456,45 +395,33 @@ impl VirtualMachine {
             }
             OpCode::Unpack => {
                 let value = match self.stack.pop() {
-                    Value::Heap(v) => match v.as_ref() {
-                        heap::Value::Bytes(v) => {
-                            let value = v.iter().rev().fold(
-                                heap::Value::Immediate(Immediate::Nil),
-                                |acc, v| {
-                                    heap::Value::Pair(
-                                        Rc::new(heap::Value::Immediate(Immediate::Char(*v))),
-                                        Rc::new(acc),
-                                    )
-                                },
-                            );
-                            Value::Heap(Rc::new(value))
-                        }
-                        heap::Value::String(v) => {
-                            let value = v.as_bytes().iter().rev().fold(
-                                heap::Value::Immediate(Immediate::Nil),
-                                |acc, v| {
-                                    heap::Value::Pair(
-                                        Rc::new(heap::Value::Immediate(Immediate::Char(*v))),
-                                        Rc::new(acc),
-                                    )
-                                },
-                            );
-                            Value::Heap(Rc::new(value))
-                        }
-                        _ => Value::Immediate(Immediate::Nil),
-                    },
+                    Value::Bytes(v) => {
+                        v.iter()
+                            .rev()
+                            .fold(Value::Immediate(Immediate::Nil), |acc, v| {
+                                Value::Pair(
+                                    Value::Immediate(Immediate::Char(*v)).into(),
+                                    acc.into(),
+                                )
+                            })
+                    }
+                    Value::String(v) => (&v[..v.len() - 1]).iter().rev().fold(
+                        Value::Immediate(Immediate::Nil),
+                        |acc, v| {
+                            Value::Pair(Value::Immediate(Immediate::Char(*v)).into(), acc.into())
+                        },
+                    ),
                     Value::Immediate(Immediate::Symbol(v)) => {
                         let pos = v.iter().position(|v| *v == 0).unwrap_or(v.len());
-                        let value = v[..pos].iter().rev().fold(
-                            heap::Value::Immediate(Immediate::Nil),
-                            |acc, v| {
-                                heap::Value::Pair(
-                                    Rc::new(heap::Value::Immediate(Immediate::Char(*v))),
-                                    Rc::new(acc),
+                        v[..pos]
+                            .iter()
+                            .rev()
+                            .fold(Value::Immediate(Immediate::Nil), |acc, v| {
+                                Value::Pair(
+                                    Value::Immediate(Immediate::Char(*v)).into(),
+                                    acc.into(),
                                 )
-                            },
-                        );
-                        Value::Heap(Rc::new(value))
+                            })
                     }
                     _ => Value::Immediate(Immediate::Nil),
                 };
@@ -502,22 +429,25 @@ impl VirtualMachine {
             }
             OpCode::Str => {
                 let value = match self.stack.pop() {
-                    Value::Heap(v) => {
+                    v @ Value::Pair(..) => {
                         //
                         // Collect the character elements of the list.
                         //
-                        let bytes: Vec<_> = v
+                        let mut bytes: Vec<_> = v
                             .iter()
-                            .filter_map(|v| match v.as_ref() {
-                                heap::Value::Immediate(Immediate::Char(v)) => Some(*v),
+                            .filter_map(|v| match v {
+                                Value::Immediate(Immediate::Char(v)) => Some(*v),
                                 _ => None,
                             })
                             .collect();
                         //
+                        // Push the null termination.
+                        //
+                        bytes.push(0);
+                        //
                         // Done.
                         //
-                        let cstr = unsafe { CString::from_vec_unchecked(bytes) };
-                        Value::Heap(Rc::new(heap::Value::String(cstr)))
+                        Value::String(bytes.into())
                     }
                     _ => Value::Immediate(Immediate::Nil),
                 };
@@ -525,19 +455,15 @@ impl VirtualMachine {
             }
             OpCode::Sym => {
                 let value = match self.stack.pop() {
-                    Value::Heap(v) => match v.as_ref() {
-                        heap::Value::String(v) => {
-                            let bytes = v.as_bytes();
-                            if bytes.len() > 15 {
-                                Value::Immediate(Immediate::Nil)
-                            } else {
-                                let mut raw = [0; 15];
-                                raw[0..bytes.len()].copy_from_slice(bytes);
-                                Value::Immediate(Immediate::Symbol(raw))
-                            }
+                    Value::String(bytes) => {
+                        if bytes.len() > 15 {
+                            Value::Immediate(Immediate::Nil)
+                        } else {
+                            let mut raw = [0; 15];
+                            raw[0..bytes.len()].copy_from_slice(&bytes);
+                            Value::Immediate(Immediate::Symbol(raw))
                         }
-                        _ => Value::Immediate(Immediate::Nil),
-                    },
+                    }
                     _ => Value::Immediate(Immediate::Nil),
                 };
                 self.stack.push(value);
@@ -546,10 +472,7 @@ impl VirtualMachine {
             // Predicates.
             //
             OpCode::IsByt => {
-                let r = match self.stack.pop() {
-                    Value::Heap(value) => matches!(value.as_ref(), heap::Value::Bytes(..)),
-                    _ => false,
-                };
+                let r = matches!(self.stack.pop(), Value::Bytes(_));
                 self.stack.push(Value::Immediate(r.into()));
             }
             OpCode::IsChr => {
@@ -561,11 +484,10 @@ impl VirtualMachine {
                 self.stack.push(Value::Immediate(r.into()));
             }
             OpCode::IsLst => {
-                let r = match self.stack.pop() {
-                    Value::Heap(value) => matches!(value.as_ref(), heap::Value::Pair(..)),
-                    Value::Immediate(Immediate::Nil) => true,
-                    _ => false,
-                };
+                let r = matches!(
+                    self.stack.pop(),
+                    Value::Immediate(Immediate::Nil) | Value::Pair(..)
+                );
                 self.stack.push(Value::Immediate(r.into()));
             }
             OpCode::IsNil => {
@@ -573,10 +495,7 @@ impl VirtualMachine {
                 self.stack.push(Value::Immediate(r.into()));
             }
             OpCode::IsStr => {
-                let r = match self.stack.pop() {
-                    Value::Heap(value) => matches!(value.as_ref(), heap::Value::String(..)),
-                    _ => false,
-                };
+                let r = matches!(self.stack.pop(), Value::String(..));
                 self.stack.push(Value::Immediate(r.into()));
             }
             OpCode::IsSym => {
@@ -627,11 +546,11 @@ impl VirtualMachine {
 //
 
 impl VirtualMachine {
-    fn bind(artifacts: &Artifacts) -> Result<Vec<ffi::Stub>, Error> {
+    fn bind(artifacts: &Artifacts) -> Result<Vec<Stub>, Error> {
         artifacts
             .external_functions()
             .iter()
-            .map(|(_, v)| ffi::Stub::try_from(v.clone()))
+            .map(|(_, v)| Stub::try_from(v.clone()))
             .collect()
     }
 

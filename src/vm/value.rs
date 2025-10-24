@@ -1,6 +1,12 @@
-use std::{ffi::CString, rc::Rc};
+use std::rc::Rc;
 
-use crate::{atom::Atom, error::Error, opcodes::Immediate, stack};
+use crate::{atom::Atom, error::Error, opcodes::Immediate};
+
+//
+// Closure.
+//
+
+pub type Closure = (usize, Box<[Value]>);
 
 //
 // Value.
@@ -8,14 +14,29 @@ use crate::{atom::Atom, error::Error, opcodes::Immediate, stack};
 
 #[derive(Clone, Debug, Eq)]
 pub enum Value {
-    Bytes(Box<[u8]>),
-    Closure(stack::Closure),
+    Bytes(Rc<[u8]>),
+    Closure(Rc<Closure>),
     Immediate(Immediate),
-    Pair(Rc<Value>, Rc<Value>),
-    String(CString),
+    Link(usize),
+    Pair(Box<Value>, Box<Value>),
+    String(Rc<[u8]>),
 }
 
 impl Value {
+    pub fn as_immediate(&self) -> Immediate {
+        match self {
+            Value::Immediate(v) => *v,
+            _ => panic!("Expected an immediate value"),
+        }
+    }
+
+    pub fn as_link(&self) -> usize {
+        match self {
+            Value::Link(v) => *v,
+            _ => panic!("Expected a return link"),
+        }
+    }
+
     pub fn as_mut_ptr(&self) -> *mut u8 {
         match self {
             Value::Bytes(v) => {
@@ -44,23 +65,15 @@ impl Value {
         }
     }
 
-    pub fn is_pair(&self) -> bool {
-        matches!(self, Self::Pair(..))
-    }
-
-    pub fn iter(&self) -> ValueIterator {
-        ValueIterator(Rc::new(self.clone()))
-    }
-
-    pub fn conc(a: Rc<Value>, b: Rc<Value>) -> Rc<Value> {
-        match a.as_ref() {
-            Value::Pair(car, cdr) => Self::cons(car.clone(), Self::conc(cdr.clone(), b)),
-            _ => b,
+    pub fn conc(a: Box<Value>, b: Value) -> Value {
+        match *a {
+            Value::Pair(car, cdr) => Self::Pair(car, Self::conc(cdr, b).into()),
+            _ => b.clone(),
         }
     }
 
-    pub fn cons(a: Rc<Value>, b: Rc<Value>) -> Rc<Value> {
-        Self::Pair(a, b).into()
+    pub fn iter(&self) -> ValueIterator<'_> {
+        ValueIterator(self)
     }
 
     fn fmt_pair(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -83,18 +96,31 @@ impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Bytes(_) => write!(f, "#<bytes>"),
-            Value::Closure(v) => write!(f, "{v}"),
+            Value::Closure(v) => {
+                let (args, vals) = v.as_ref();
+                let vals = vals.to_vec();
+                let vals: Vec<_> = vals.into_iter().map(|v| v.to_string()).collect();
+                write!(f, "K({},{})", args, vals.join(","))
+            }
             Value::Immediate(v) => write!(f, "{v}"),
+            Value::Link(v) => write!(f, "#L({v})"),
             Value::Pair(..) => {
                 write!(f, "(")?;
                 self.fmt_pair(f)?;
                 write!(f, ")")
             }
             Value::String(value) => {
-                let val = value.as_c_str().to_string_lossy();
+                let sub = &value[..value.len() - 1];
+                let val = unsafe { std::str::from_utf8_unchecked(sub) };
                 write!(f, "\"{val}\"")
             }
         }
+    }
+}
+
+impl From<Immediate> for Value {
+    fn from(value: Immediate) -> Self {
+        Self::Immediate(value)
     }
 }
 
@@ -103,17 +129,22 @@ impl TryFrom<Rc<Atom>> for Value {
 
     fn try_from(value: Rc<Atom>) -> Result<Self, Self::Error> {
         match value.as_ref() {
+            Atom::Nil(_)
+            | Atom::True(_)
+            | Atom::Char(..)
+            | Atom::Number(..)
+            | Atom::Symbol(..)
+            | Atom::Wildcard(_) => Immediate::try_from(value).map(Self::Immediate),
             Atom::Pair(_, car, cdr) => {
                 let car: Self = car.clone().try_into()?;
                 let cdr: Self = cdr.clone().try_into()?;
-                Ok(Self::Pair(Rc::new(car), Rc::new(cdr)))
+                Ok(Self::Pair(car.into(), cdr.into()))
             }
             Atom::String(_, v) => {
-                let bytes = v.as_bytes().to_vec();
-                let val = unsafe { CString::from_vec_unchecked(bytes) };
-                Ok(Self::String(val))
+                let mut bytes = v.as_bytes().to_vec();
+                bytes.push(0);
+                Ok(Self::String(bytes.into()))
             }
-            _ => Immediate::try_from(value).map(Self::Immediate),
         }
     }
 }
@@ -132,6 +163,7 @@ impl PartialEq for Value {
             (Value::Bytes(a), Value::Bytes(b)) => a == b,
             (Value::Closure(a), Value::Closure(b)) => a == b,
             (Value::Immediate(a), Value::Immediate(b)) => a == b,
+            (Value::Link(a), Value::Link(b)) => a == b,
             (Value::Pair(car0, cdr0), Value::Pair(car1, cdr1)) => car0 == car1 && cdr0 == cdr1,
             (Value::String(a), Value::String(b)) => a == b,
             //
@@ -146,16 +178,16 @@ impl PartialEq for Value {
 // Value iterator.
 //
 
-pub struct ValueIterator(Rc<Value>);
+pub struct ValueIterator<'a>(&'a Value);
 
-impl std::iter::Iterator for ValueIterator {
-    type Item = Rc<Value>;
+impl<'a> std::iter::Iterator for ValueIterator<'a> {
+    type Item = &'a Value;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.0.as_ref() {
+        match self.0 {
             Value::Pair(car, cdr) => {
-                let result = car.clone();
-                self.0 = cdr.clone();
+                let result = car.as_ref();
+                self.0 = cdr.as_ref();
                 Some(result)
             }
             _ => None,

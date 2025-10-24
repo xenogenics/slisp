@@ -1,6 +1,6 @@
 use std::{ops::Add, rc::Rc, str::Chars};
 
-use crate::{error::Error, heap, opcodes, stack};
+use crate::{error::Error, opcodes, vm};
 
 //
 // Location.
@@ -307,47 +307,32 @@ impl TryFrom<opcodes::Immediate> for Rc<Atom> {
 }
 
 //
-// TryFrom<heap::Value>.
+// TryFrom<vm::Value>.
 //
 
-impl TryFrom<heap::Value> for Rc<Atom> {
+impl TryFrom<vm::Value> for Rc<Atom> {
     type Error = Error;
 
-    fn try_from(value: heap::Value) -> Result<Self, Self::Error> {
+    fn try_from(value: vm::Value) -> Result<Self, Self::Error> {
         match value {
-            heap::Value::Immediate(v) => v.try_into(),
-            heap::Value::Pair(car, cdr) => {
-                let car = car.as_ref().clone().try_into()?;
-                let cdr = cdr.as_ref().clone().try_into()?;
-                Ok(Atom::Pair(Span::None, car, cdr).into())
-            }
-            heap::Value::Bytes(v) => {
+            vm::Value::Bytes(v) => {
                 let value = v
                     .iter()
                     .rev()
                     .fold(Atom::nil(), |acc, v| Atom::cons(Atom::char(*v), acc));
                 Ok(value)
             }
-            heap::Value::String(v) => {
-                let value = v.as_c_str().to_str().map_err(|_| Error::InvalidString)?;
-                Ok(Atom::string(value))
+            vm::Value::Immediate(v) => v.try_into(),
+            vm::Value::Pair(car, cdr) => {
+                let car = car.as_ref().clone().try_into()?;
+                let cdr = cdr.as_ref().clone().try_into()?;
+                Ok(Atom::Pair(Span::None, car, cdr).into())
             }
-            _ => Err(Error::ExpectedPairOrImmediate(Span::None)),
-        }
-    }
-}
-
-//
-// TryFrom<stack::Value>.
-//
-
-impl TryFrom<stack::Value> for Rc<Atom> {
-    type Error = Error;
-
-    fn try_from(value: stack::Value) -> Result<Self, Self::Error> {
-        match value {
-            stack::Value::Heap(v) => v.as_ref().clone().try_into(),
-            stack::Value::Immediate(v) => v.try_into(),
+            vm::Value::String(v) => {
+                let sub = &v[..v.len() - 1];
+                let val = unsafe { std::str::from_utf8_unchecked(sub) };
+                Ok(Atom::string(val))
+            }
             _ => Err(Error::ExpectedPairOrImmediate(Span::None)),
         }
     }

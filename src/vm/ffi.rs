@@ -6,7 +6,7 @@ use crate::{
     error::Error,
     ir::{ExternalDefinition, ExternalType},
     opcodes::{Arity, Immediate},
-    stack,
+    vm,
 };
 
 //
@@ -33,10 +33,10 @@ impl Value {
     }
 }
 
-impl TryFrom<(ExternalType, &stack::Value)> for Value {
+impl TryFrom<(ExternalType, &vm::Value)> for Value {
     type Error = Error;
 
-    fn try_from(value: (ExternalType, &stack::Value)) -> Result<Self, Self::Error> {
+    fn try_from(value: (ExternalType, &vm::Value)) -> Result<Self, Self::Error> {
         match value.0 {
             ExternalType::Bytes => {
                 let bytes = value.1.as_mut_ptr();
@@ -71,7 +71,7 @@ impl Stub {
         Arity::Some(self.args.len() as u16)
     }
 
-    pub fn call(&mut self, vals: &[stack::Value]) -> Result<stack::Value, Error> {
+    pub fn call(&mut self, vals: &[vm::Value]) -> Result<vm::Value, Error> {
         //
         // Convert the argument to FFI values.
         //
@@ -97,7 +97,7 @@ impl Stub {
                         low::CodePtr(self.func),
                         pointers.as_mut_ptr(),
                     );
-                    stack::Value::Immediate(Immediate::Number(res))
+                    vm::Value::Immediate(Immediate::Number(res))
                 }
                 ExternalType::Void => {
                     low::call::<c_void>(
@@ -105,7 +105,7 @@ impl Stub {
                         low::CodePtr(self.func),
                         pointers.as_mut_ptr(),
                     );
-                    stack::Value::Immediate(Immediate::Nil)
+                    vm::Value::Immediate(Immediate::Nil)
                 }
                 _ => unimplemented!(),
             }

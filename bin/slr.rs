@@ -8,8 +8,7 @@ use sl::{
     atom::Atom,
     compiler::{Artifacts, Compiler, CompilerTrait},
     grammar::{ExpressionParser, ListsParser},
-    stack,
-    vm::{RunParameters, VirtualMachine},
+    vm::{RunParameters, Value, VirtualMachine},
 };
 use strum_macros::EnumString;
 use thiserror::Error;
@@ -181,7 +180,11 @@ impl Validator for InputValidator {
 // Macro expansion.
 //
 
-fn expand(mut compiler: Compiler, stmt: &str) -> Result<(), sl::error::Error> {
+fn expand(
+    mut compiler: Compiler,
+    stmt: &str,
+    params: RunParameters,
+) -> Result<(), sl::error::Error> {
     //
     // Declare the parser.
     //
@@ -199,7 +202,7 @@ fn expand(mut compiler: Compiler, stmt: &str) -> Result<(), sl::error::Error> {
     //
     // Expand the macro.
     //
-    match compiler.expand(atom, RunParameters::default()) {
+    match compiler.expand(atom, params) {
         Ok(value) => println!("{value}"),
         Err(err) => println!("! {err}"),
     }
@@ -260,7 +263,7 @@ fn eval(
     mut compiler: Compiler,
     expr: Rc<Atom>,
     params: RunParameters,
-) -> Result<stack::Value, sl::error::Error> {
+) -> Result<Value, sl::error::Error> {
     //
     // Wrap the statement into a top-level function.
     //
@@ -367,7 +370,8 @@ fn main() -> Result<(), Error> {
                             continue;
                         }
                         Command::Expand(statement) => {
-                            expand(compiler.clone(), &statement)?;
+                            let params = RunParameters::new(args.stack_size, trace, depth);
+                            expand(compiler.clone(), &statement, params)?;
                             continue;
                         }
                         Command::Inspect(symbol) => {
