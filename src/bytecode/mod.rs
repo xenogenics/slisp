@@ -20,9 +20,9 @@ mod tests;
 // Usages.
 //
 
-pub use compiler::{Artifacts, Compiler, CompilerTrait};
+pub use compiler::{Artifacts, Compiler};
 pub use ffi::Stub;
 pub use opcodes::{OpCode, OpCodes};
 pub use stack::Stack;
 pub use value::{Closure, Immediate, Pair, Value};
-pub use vm::{RunParameters, VirtualMachine};
+pub use vm::VirtualMachine;

@@ -5,7 +5,8 @@ use reedline::{
     DefaultPrompt, FileBackedHistory, Reedline, ReedlineError, Signal, ValidationResult, Validator,
 };
 use sl::{
-    bytecode::{Artifacts, Compiler, CompilerTrait, RunParameters, VirtualMachine},
+    Compiler as CompilerTrait, RunParameters,
+    bytecode::{Artifacts, Compiler, VirtualMachine},
     reader::{Atom, ExpressionParser, ListsParser},
 };
 use strum_macros::EnumString;
@@ -124,6 +125,8 @@ impl FromStr for Command {
 struct NullCompiler;
 
 impl CompilerTrait for NullCompiler {
+    type Artifacts = Artifacts;
+
     fn eval(self, _: Rc<Atom>, _: RunParameters) -> Result<Rc<Atom>, sl::error::Error> {
         Ok(Atom::nil())
     }

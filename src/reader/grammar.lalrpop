@@ -3,9 +3,9 @@ use std::rc::Rc;
 use lalrpop_util::ParseError;
 
 use crate::reader::{Atom, Span};
-use crate::bytecode::{CompilerTrait, RunParameters};
+use crate::{Compiler, RunParameters};
 
-grammar<C>(compiler: &mut C) where C: CompilerTrait;
+grammar<C>(compiler: &mut C) where C: Compiler;
 
 extern {
   type Error = crate::error::Error;

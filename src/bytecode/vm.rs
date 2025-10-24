@@ -1,45 +1,11 @@
 use std::collections::BTreeMap;
 
 use crate::{
+    RunParameters,
     bytecode::{Artifacts, Immediate, OpCode, Pair, Stack, Stub, Value},
     error::Error,
     reader::Arity,
 };
-
-//
-// Parameters.
-//
-
-#[derive(Clone, Copy)]
-pub struct RunParameters {
-    stack_size: usize,
-    trace: bool,
-    depth: usize,
-}
-
-impl RunParameters {
-    pub fn new(stack_size: usize, trace: bool, depth: usize) -> Self {
-        Self {
-            stack_size,
-            trace,
-            depth,
-        }
-    }
-}
-
-impl Default for RunParameters {
-    fn default() -> Self {
-        Self {
-            stack_size: 1024,
-            trace: false,
-            depth: 10,
-        }
-    }
-}
-
-//
-// Virtual machine.
-//
 
 pub struct VirtualMachine {
     entry: String,

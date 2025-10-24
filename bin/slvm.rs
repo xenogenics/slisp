@@ -1,6 +1,7 @@
 use clap::{Parser, arg};
 use sl::{
-    bytecode::{Artifacts, RunParameters, Value, VirtualMachine},
+    RunParameters,
+    bytecode::{Artifacts, Value, VirtualMachine},
     reader::Atom,
 };
 use thiserror::Error;

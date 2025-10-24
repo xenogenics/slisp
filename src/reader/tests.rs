@@ -1,7 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    bytecode::{Artifacts, CompilerTrait, RunParameters},
+    Compiler as CompilerTrait, RunParameters,
+    bytecode::Artifacts,
     error::Error,
     reader::{atom::Atom, grammar::ListsParser, ir::TopLevelStatement},
 };
@@ -15,6 +16,8 @@ use map_macro::btree_set;
 pub struct NullCompiler;
 
 impl CompilerTrait for NullCompiler {
+    type Artifacts = Artifacts;
+
     fn eval(self, _: Rc<Atom>, _: RunParameters) -> Result<Rc<Atom>, Error> {
         Err(Error::NotSupported)
     }

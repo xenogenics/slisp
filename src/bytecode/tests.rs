@@ -1,6 +1,7 @@
 use crate::{
+    Compiler as CompilerTrait,
     bytecode::{
-        Artifacts, Compiler, CompilerTrait, Immediate, OpCode,
+        Artifacts, Compiler, Immediate, OpCode,
         compiler::{Context, LabelOrOpCode},
     },
     error::Error,

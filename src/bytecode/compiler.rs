@@ -8,7 +8,8 @@ use bincode::{Decode, Encode};
 use strum::IntoEnumIterator;
 
 use crate::{
-    bytecode::{Immediate, OpCode, OpCodes, RunParameters, VirtualMachine},
+    Compiler as CompilerTrait, RunParameters,
+    bytecode::{Immediate, OpCode, OpCodes, VirtualMachine},
     error::Error,
     reader::{
         Arguments, Arity, Atom, Backquote, Binding, Bindings, CallSite, ConstantDefinition,
@@ -220,17 +221,6 @@ impl Artifacts {
 }
 
 //
-// Compiler trait.
-//
-
-pub trait CompilerTrait: Clone {
-    fn eval(self, atom: Rc<Atom>, params: RunParameters) -> Result<Rc<Atom>, Error>;
-    fn expand(self, atom: Rc<Atom>, params: RunParameters) -> Result<Rc<Atom>, Error>;
-    fn load(&mut self, atom: Rc<Atom>) -> Result<(), Error>;
-    fn compile(self, entrypoint: &str) -> Result<Artifacts, Error>;
-}
-
-//
 // Compiler.
 //
 
@@ -260,6 +250,8 @@ impl Compiler {
 //
 
 impl CompilerTrait for Compiler {
+    type Artifacts = Artifacts;
+
     fn eval(mut self, expr: Rc<Atom>, params: RunParameters) -> Result<Rc<Atom>, Error> {
         //
         // Define the symbol.

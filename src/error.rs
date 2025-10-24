@@ -1,11 +1,14 @@
 use std::env::VarError;
 
+use inkwell::{builder::BuilderError, support::LLVMString};
 use thiserror::Error;
 
 use crate::reader::Span;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error(transparent)]
+    BuilderError(#[from] BuilderError),
     #[error("Main endpoint not defined")]
     EntrypointNotDefined,
     #[error(transparent)]
@@ -54,11 +57,10 @@ pub enum Error {
     InvalidSystemCall(Box<str>),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    LlvmError(#[from] LLVMString),
     #[error("Macro expansion failed: {0}")]
     MacroExpansion(Box<str>),
-    #[cfg(test)]
-    #[error("No such context")]
-    NoSuchContext,
     #[cfg(test)]
     #[error("Operation not supported")]
     NotSupported,

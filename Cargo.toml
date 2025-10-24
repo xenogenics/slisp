@@ -2,6 +2,7 @@
 name = "sl"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
 
 [[bin]]
 name = "sl"
@@ -25,6 +26,7 @@ path = "bin/slvm.rs"
 
 [build-dependencies]
 lalrpop = "0.20"
+vergen = { version = "9.0", features = ["rustc"] }
 
 [dev-dependencies]
 map-macro = "0.3"
@@ -34,6 +36,7 @@ bincode = "2.0"
 clap = { version = "4.5", features = ["derive"] }
 dlopen2 = "0.8"
 env_logger = "0.11"
+inkwell = { version = "0.6", features = ["llvm18-1-prefer-dynamic"] }
 lalrpop-util = { version = "0.20", features = ["lexer"] }
 libc = "0.2"
 libffi = "4.1"
@@ -46,3 +49,6 @@ thiserror = "2.0"
 lto = "fat"
 codegen-units = 1
 debug = false
+
+[target.aarch64-apple-darwin.env]
+LLVM_SYS_181_PREFIX="/opt/homebrew/opt/llvm@18"

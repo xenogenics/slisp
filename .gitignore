@@ -1,5 +1,7 @@
 /.cargo
 /target
-*.bc
-*.svg
-*.txt
+/*.bc
+/*.ll
+/*.o
+/*.svg
+/*.txt

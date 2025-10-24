@@ -2,7 +2,8 @@ use std::io::Read;
 
 use clap::{Parser, arg};
 use sl::{
-    bytecode::{Compiler, CompilerTrait, RunParameters, Value, VirtualMachine},
+    Compiler as CompilerTrait, RunParameters,
+    bytecode::{Compiler, Value, VirtualMachine},
     reader::{Atom, ListsParser},
 };
 use thiserror::Error;

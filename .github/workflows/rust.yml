@@ -16,7 +16,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Setup
+    - name: Packages
+      run: sudo apt install -y llvm-dev
+    - name: Rust
       uses: actions-rs/toolchain@v1
       with:
         profile: minimal
