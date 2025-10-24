@@ -1,5 +1,5 @@
 use clap::{Parser, arg};
-use sl::compiler::Artifacts;
+use sl::bytecode::Artifacts;
 use thiserror::Error;
 
 #[derive(Parser)]

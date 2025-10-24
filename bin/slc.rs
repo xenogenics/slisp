@@ -2,8 +2,8 @@ use std::io::Read;
 
 use clap::{Parser, arg};
 use sl::{
-    compiler::{Compiler, CompilerTrait},
-    grammar::ListsParser,
+    bytecode::{Compiler, CompilerTrait},
+    reader::ListsParser,
 };
 use thiserror::Error;
 

@@ -1,8 +1,7 @@
 use clap::{Parser, arg};
 use sl::{
-    atom::Atom,
-    compiler::Artifacts,
-    vm::{RunParameters, Value, VirtualMachine},
+    bytecode::{Artifacts, RunParameters, Value, VirtualMachine},
+    reader::Atom,
 };
 use thiserror::Error;
 
@@ -80,7 +79,7 @@ fn main() -> Result<(), Error> {
     //
     // Print the result.
     //
-    let atom = Atom::from_value(result, &symbols)?;
+    let atom = result.into_atom(&symbols)?;
     println!("{atom}");
     //
     // Done.

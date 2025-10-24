@@ -1,9 +1,6 @@
 use std::rc::Rc;
 
-use crate::{
-    opcodes::Immediate,
-    vm::{Closure, Value, value::Cell},
-};
+use crate::bytecode::value::{Pair, Closure, Immediate, Value};
 
 #[derive(Debug)]
 pub struct Stack(Vec<Value>);
@@ -66,7 +63,7 @@ impl Stack {
             let result = self.0[self.0.len() - n..]
                 .iter()
                 .fold(Value::Immediate(Immediate::Nil), |acc, v| {
-                    Value::Pair(Cell::new(v.clone(), acc).into())
+                    Value::Pair(Pair::new(v.clone(), acc).into())
                 });
             //
             // Drop the N element from the stack.

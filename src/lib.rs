@@ -4,28 +4,9 @@
 extern crate lalrpop_util;
 
 //
-// Grammar.
-//
-
-lalrpop_mod!(
-    #[allow(clippy::all)]
-    pub grammar
-);
-
-//
 // Modules.
 //
 
-pub mod atom;
-pub mod compiler;
+pub mod bytecode;
 pub mod error;
-pub mod ir;
-pub mod opcodes;
-pub mod vm;
-
-//
-// Tests.
-//
-
-#[cfg(test)]
-mod tests;
+pub mod reader;

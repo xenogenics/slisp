@@ -2,7 +2,7 @@ use std::env::VarError;
 
 use thiserror::Error;
 
-use crate::atom::Span;
+use crate::reader::Span;
 
 #[derive(Debug, Error)]
 pub enum Error {

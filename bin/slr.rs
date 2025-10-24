@@ -5,10 +5,8 @@ use reedline::{
     DefaultPrompt, FileBackedHistory, Reedline, ReedlineError, Signal, ValidationResult, Validator,
 };
 use sl::{
-    atom::Atom,
-    compiler::{Artifacts, Compiler, CompilerTrait},
-    grammar::{ExpressionParser, ListsParser},
-    vm::{RunParameters, VirtualMachine},
+    bytecode::{Artifacts, Compiler, CompilerTrait, RunParameters, VirtualMachine},
+    reader::{Atom, ExpressionParser, ListsParser},
 };
 use strum_macros::EnumString;
 use thiserror::Error;
@@ -297,7 +295,7 @@ fn eval(
     //
     // Convert the result.
     //
-    let atom = Atom::from_value(result, &symbols)?;
+    let atom = result.into_atom(&symbols)?;
     //
     // Done.
     //

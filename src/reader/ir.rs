@@ -3,7 +3,32 @@ use std::{collections::BTreeSet, fmt::Display, rc::Rc, str::FromStr};
 use bincode::{Decode, Encode};
 use strum_macros::{Display, EnumIter, EnumString};
 
-use crate::{atom::Atom, error::Error, opcodes::Arity};
+use crate::{error::Error, reader::atom::Atom};
+
+//
+// Arity.
+//
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Encode, Decode)]
+#[repr(u32)]
+pub enum Arity {
+    #[default]
+    All,
+    Some(u16),
+    SomeWithRem(u16),
+    None,
+}
+
+impl std::fmt::Display for Arity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Arity::All => write!(f, "*"),
+            Arity::Some(n) => write!(f, "{n}"),
+            Arity::SomeWithRem(n) => write!(f, "{n}+"),
+            Arity::None => write!(f, "0"),
+        }
+    }
+}
 
 //
 // Binding.

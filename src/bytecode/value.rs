@@ -1,6 +1,10 @@
+use bincode::{Decode, Encode};
 use std::{collections::BTreeMap, rc::Rc};
 
-use crate::{atom::Atom, error::Error, opcodes::Immediate};
+use crate::{
+    error::Error,
+    reader::{Arity, Atom, Span},
+};
 
 //
 // Closure.
@@ -9,13 +13,127 @@ use crate::{atom::Atom, error::Error, opcodes::Immediate};
 pub type Closure = (usize, Box<[Value]>);
 
 //
-// Cell.
+// Immediates.
+//
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode)]
+pub enum Immediate {
+    Nil,
+    True,
+    Char(u8),
+    Number(i64),
+    Extcall(u32),
+    Funcall(u32, Arity),
+    Symbol(u32),
+    Wildcard,
+}
+
+impl Immediate {
+    pub const fn extcall(idx: usize) -> Self {
+        Self::Extcall(idx as u32)
+    }
+
+    pub const fn funcall(idx: usize, arity: Arity) -> Self {
+        Self::Funcall(idx as u32, arity)
+    }
+
+    pub const fn as_funcall(&self) -> (u32, Arity) {
+        match self {
+            Immediate::Funcall(idx, cnt) => (*idx, *cnt),
+            _ => panic!("Expected a funcall"),
+        }
+    }
+
+    pub const fn as_number(&self) -> i64 {
+        match self {
+            Immediate::Char(v) => *v as i64,
+            Immediate::Number(v) => *v,
+            _ => panic!("Expected a number"),
+        }
+    }
+
+    pub fn into_atom(self, syms: &BTreeMap<Box<str>, u32>) -> Result<Rc<Atom>, Error> {
+        match self {
+            Self::Nil => Ok(Atom::Nil(Span::None).into()),
+            Self::True => Ok(Atom::True(Span::None).into()),
+            Self::Char(v) => Ok(Atom::Char(Span::None, v).into()),
+            Self::Number(v) => Ok(Atom::Number(Span::None, v).into()),
+            Self::Symbol(v) => {
+                let (sym, _) = syms
+                    .iter()
+                    .find(|(_, i)| **i == v)
+                    .ok_or(Error::SymbolNotFound)?;
+                Ok(Atom::Symbol(Span::None, sym.clone()).into())
+            }
+            Self::Wildcard => Ok(Atom::Wildcard(Span::None).into()),
+            _ => todo!(),
+        }
+    }
+}
+
+impl std::fmt::Display for Immediate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Immediate::Nil => write!(f, "nil"),
+            Immediate::True => write!(f, "T"),
+            Immediate::Char(c) => match *c as char {
+                '\0' => write!(f, "^\\0"),
+                '\x1B' => write!(f, "^\\e"),
+                '\n' => write!(f, "^\\n"),
+                '\r' => write!(f, "^\\r"),
+                ' ' => write!(f, "^\\s"),
+                '\t' => write!(f, "^\\t"),
+                '"' => write!(f, "^\""),
+                '\\' => write!(f, "^\\"),
+                _ => write!(f, "^{}", *c as char),
+            },
+
+            Immediate::Number(n) => write!(f, "{n}"),
+            Immediate::Extcall(v) => write!(f, "#X({v})",),
+            Immediate::Funcall(v, arity) => write!(f, "#F({v},{arity})"),
+            Immediate::Symbol(v) => write!(f, "#S({v})"),
+            Immediate::Wildcard => write!(f, "_"),
+        }
+    }
+}
+
+impl From<bool> for Immediate {
+    fn from(value: bool) -> Self {
+        if value { Self::True } else { Self::Nil }
+    }
+}
+
+impl From<i64> for Immediate {
+    fn from(value: i64) -> Self {
+        Self::Number(value)
+    }
+}
+
+impl Immediate {
+    pub fn from_atom(value: Rc<Atom>, syms: &BTreeMap<Box<str>, u32>) -> Result<Self, Error> {
+        match value.as_ref() {
+            Atom::Nil(_) => Ok(Self::Nil),
+            Atom::True(_) => Ok(Self::True),
+            Atom::Char(_, v) => Ok(Self::Char(*v)),
+            Atom::Number(_, v) => Ok(Self::Number(*v)),
+            Atom::Symbol(_, v) => {
+                let idx = syms.get(v).ok_or(Error::SymbolNotFound)?;
+                Ok(Immediate::Symbol(*idx))
+            }
+            Atom::Wildcard(_) => Ok(Self::Wildcard),
+            _ => Err(Error::ExpectedImmediate(value.span())),
+        }
+    }
+}
+
+//
+// Pair.
 //
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Cell(Value, Value);
+pub struct Pair(Value, Value);
 
-impl Cell {
+impl Pair {
     pub fn new(a: Value, b: Value) -> Self {
         Self(a, b)
     }
@@ -39,7 +157,7 @@ pub enum Value {
     Closure(Rc<Closure>),
     Immediate(Immediate),
     Link(usize),
-    Pair(Rc<Cell>),
+    Pair(Rc<Pair>),
     String(Rc<[u8]>),
 }
 
@@ -89,10 +207,34 @@ impl Value {
     pub fn conc(a: Value, b: Value) -> Value {
         match a {
             Value::Pair(cell) => {
-                let Cell(car, cdr) = cell.as_ref().clone();
-                Self::Pair(Cell(car, Self::conc(cdr, b)).into())
+                let Pair(car, cdr) = cell.as_ref().clone();
+                Self::Pair(Pair(car, Self::conc(cdr, b)).into())
             }
             _ => b,
+        }
+    }
+
+    pub fn into_atom(self, syms: &BTreeMap<Box<str>, u32>) -> Result<Rc<Atom>, Error> {
+        match self {
+            Self::Bytes(v) => {
+                let value = v
+                    .iter()
+                    .rev()
+                    .fold(Atom::nil(), |acc, v| Atom::cons(Atom::char(*v), acc));
+                Ok(value)
+            }
+            Self::Immediate(v) => v.into_atom(syms),
+            Self::Pair(cell) => {
+                let car = cell.car().clone().into_atom(syms)?;
+                let cdr = cell.cdr().clone().into_atom(syms)?;
+                Ok(Atom::Pair(Span::None, car, cdr).into())
+            }
+            Self::String(v) => {
+                let sub = &v[..v.len() - 1];
+                let val = unsafe { std::str::from_utf8_unchecked(sub) };
+                Ok(Atom::string(val))
+            }
+            _ => Err(Error::ExpectedPairOrImmediate(Span::None)),
         }
     }
 
@@ -160,7 +302,7 @@ impl Value {
             Atom::Pair(_, car, cdr) => {
                 let car = Value::from_atom(car.clone(), syms)?;
                 let cdr = Value::from_atom(cdr.clone(), syms)?;
-                Ok(Self::Pair(Cell(car, cdr).into()))
+                Ok(Self::Pair(Pair(car, cdr).into()))
             }
             Atom::String(_, v) => {
                 let mut bytes = v.as_bytes().to_vec();

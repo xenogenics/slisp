@@ -2,9 +2,8 @@ use std::rc::Rc;
 
 use lalrpop_util::ParseError;
 
-use crate::atom::{Atom, Span};
-use crate::compiler::CompilerTrait;
-use crate::vm::RunParameters;
+use crate::reader::{Atom, Span};
+use crate::bytecode::{CompilerTrait, RunParameters};
 
 grammar<C>(compiler: &mut C) where C: CompilerTrait;
 

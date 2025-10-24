@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    compiler::Artifacts,
+    bytecode::{Artifacts, Immediate, OpCode, Pair, Stack, Stub, Value},
     error::Error,
-    opcodes::{Arity, Immediate, OpCode},
-    vm::{Stack, Value, ffi::Stub, value::Cell},
+    reader::Arity,
 };
 
 //
@@ -362,7 +361,7 @@ impl VirtualMachine {
             },
             OpCode::Cons => {
                 let (a, b) = (self.stack.pop(), self.stack.pop());
-                let value = Value::Pair(Cell::new(a, b).into());
+                let value = Value::Pair(Pair::new(a, b).into());
                 self.stack.push(value);
             }
             //
@@ -412,14 +411,14 @@ impl VirtualMachine {
                             .rev()
                             .fold(Value::Immediate(Immediate::Nil), |acc, v| {
                                 let car = Value::Immediate(Immediate::Char(*v));
-                                Value::Pair(Cell::new(car, acc).into())
+                                Value::Pair(Pair::new(car, acc).into())
                             })
                     }
                     Value::String(v) => (&v[..v.len() - 1]).iter().rev().fold(
                         Value::Immediate(Immediate::Nil),
                         |acc, v| {
                             let car = Value::Immediate(Immediate::Char(*v));
-                            Value::Pair(Cell::new(car, acc).into())
+                            Value::Pair(Pair::new(car, acc).into())
                         },
                     ),
                     Value::Immediate(Immediate::Symbol(v)) => {
@@ -431,7 +430,7 @@ impl VirtualMachine {
                             .rev()
                             .fold(Value::Immediate(Immediate::Nil), |acc, v| {
                                 let car = Value::Immediate(Immediate::Char(v));
-                                Value::Pair(Cell::new(car, acc).into())
+                                Value::Pair(Pair::new(car, acc).into())
                             })
                     }
                     _ => Value::Immediate(Immediate::Nil),

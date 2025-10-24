@@ -1,6 +1,4 @@
-use std::{collections::BTreeMap, ops::Add, rc::Rc, str::Chars};
-
-use crate::{error::Error, opcodes, vm};
+use std::{ops::Add, rc::Rc, str::Chars};
 
 //
 // Location.
@@ -277,64 +275,6 @@ impl std::iter::Iterator for AtomIterator {
                 Some(value)
             }
             _ => None,
-        }
-    }
-}
-
-//
-// From<opcodes::Immediate>.
-//
-//
-
-impl Atom {
-    pub fn from_immediate(
-        value: opcodes::Immediate,
-        syms: &BTreeMap<Box<str>, u32>,
-    ) -> Result<Rc<Self>, Error> {
-        match value {
-            opcodes::Immediate::Nil => Ok(Atom::Nil(Span::None).into()),
-            opcodes::Immediate::True => Ok(Atom::True(Span::None).into()),
-            opcodes::Immediate::Char(v) => Ok(Atom::Char(Span::None, v).into()),
-            opcodes::Immediate::Number(v) => Ok(Atom::Number(Span::None, v).into()),
-            opcodes::Immediate::Symbol(v) => {
-                let (sym, _) = syms
-                    .iter()
-                    .find(|(_, i)| **i == v)
-                    .ok_or(Error::SymbolNotFound)?;
-                Ok(Atom::Symbol(Span::None, sym.clone()).into())
-            }
-            opcodes::Immediate::Wildcard => Ok(Atom::Wildcard(Span::None).into()),
-            _ => todo!(),
-        }
-    }
-}
-
-//
-// TryFrom<vm::Value>.
-//
-
-impl Atom {
-    pub fn from_value(value: vm::Value, syms: &BTreeMap<Box<str>, u32>) -> Result<Rc<Self>, Error> {
-        match value {
-            vm::Value::Bytes(v) => {
-                let value = v
-                    .iter()
-                    .rev()
-                    .fold(Atom::nil(), |acc, v| Atom::cons(Atom::char(*v), acc));
-                Ok(value)
-            }
-            vm::Value::Immediate(v) => Self::from_immediate(v, syms),
-            vm::Value::Pair(cell) => {
-                let car = Self::from_value(cell.car().clone(), syms)?;
-                let cdr = Self::from_value(cell.cdr().clone(), syms)?;
-                Ok(Atom::Pair(Span::None, car, cdr).into())
-            }
-            vm::Value::String(v) => {
-                let sub = &v[..v.len() - 1];
-                let val = unsafe { std::str::from_utf8_unchecked(sub) };
-                Ok(Atom::string(val))
-            }
-            _ => Err(Error::ExpectedPairOrImmediate(Span::None)),
         }
     }
 }

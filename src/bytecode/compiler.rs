@@ -8,15 +8,13 @@ use bincode::{Decode, Encode};
 use strum::IntoEnumIterator;
 
 use crate::{
-    atom::{Atom, Span},
+    bytecode::{Immediate, OpCode, OpCodes, RunParameters, VirtualMachine},
     error::Error,
-    grammar::ListsParser,
-    ir::{
-        Arguments, Backquote, Binding, Bindings, CallSite, ConstantDefinition, ExternalDefinition,
-        FunctionDefinition, Operator, Quote, Statement, Statements, TopLevelStatement, Value,
+    reader::{
+        Arguments, Arity, Atom, Backquote, Binding, Bindings, CallSite, ConstantDefinition,
+        ExternalDefinition, FunctionDefinition, ListsParser, Operator, Quote, Span, Statement,
+        Statements, TopLevelStatement, Value,
     },
-    opcodes::{Arity, Immediate, OpCode, OpCodes},
-    vm::{RunParameters, VirtualMachine},
 };
 
 //
@@ -305,7 +303,7 @@ impl CompilerTrait for Compiler {
         //
         // Convert the result into an atom.
         //
-        Atom::from_value(result, &symbols)
+        result.into_atom(&symbols)
     }
 
     fn expand(mut self, expr: Rc<Atom>, params: RunParameters) -> Result<Rc<Atom>, Error> {
