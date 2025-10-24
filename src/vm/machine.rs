@@ -1,8 +1,10 @@
+use std::collections::BTreeMap;
+
 use crate::{
     compiler::Artifacts,
     error::Error,
     opcodes::{Arity, Immediate, OpCode},
-    vm::{Stack, Value, ffi::Stub},
+    vm::{Stack, Value, ffi::Stub, value::Cell},
 };
 
 //
@@ -61,12 +63,16 @@ impl VirtualMachine {
         self.stack.push(value);
     }
 
-    pub fn run(&mut self, artifacts: Artifacts) -> Result<Value, Error> {
+    pub fn run(
+        &mut self,
+        artifacts: &Artifacts,
+        symbols: &mut BTreeMap<Box<str>, u32>,
+    ) -> Result<Value, Error> {
         let mut print_label = true;
         //
         // Get the artifacts.
         //
-        let syms = artifacts.symbols();
+        let fns = artifacts.internal_functions();
         let ops = artifacts.opcodes();
         //
         // Bind the FFIs.
@@ -75,7 +81,7 @@ impl VirtualMachine {
         //
         // Look-up the entrypoint function.
         //
-        let entrypoint_fn = syms
+        let entrypoint_fn = fns
             .iter()
             .find_map(|(k, v, _)| (k.as_ref() == self.entry.as_str()).then_some(v))
             .copied();
@@ -103,7 +109,7 @@ impl VirtualMachine {
             // Execute the current opcode.
             //
             let ppc = pc;
-            pc = self.execute(ops, &mut ffis, pc)?;
+            pc = self.execute(ops, &mut ffis, symbols, pc)?;
             //
             // Print trace.
             //
@@ -111,7 +117,7 @@ impl VirtualMachine {
                 //
                 // Print the function label if PPC points to its first opcode.
                 //
-                if syms.iter().find(|(_, n, _)| *n == ppc).is_some() {
+                if fns.iter().find(|(_, n, _)| *n == ppc).is_some() {
                     print_label = true;
                 }
                 //
@@ -121,14 +127,14 @@ impl VirtualMachine {
                     //
                     // Get the index of the first function not containing PPC.
                     //
-                    let index = syms
+                    let index = fns
                         .iter()
                         .position(|(_, n, _)| *n > ppc)
-                        .unwrap_or(syms.len());
+                        .unwrap_or(fns.len());
                     //
                     // Print the label.
                     //
-                    if let Some((e, _, _)) = syms.get(index - 1) {
+                    if let Some((e, _, _)) = fns.get(index - 1) {
                         println!("{e}:");
                     }
                     //
@@ -172,11 +178,17 @@ impl VirtualMachine {
         Ok(self.stack.pop())
     }
 
-    fn execute(&mut self, ops: &[OpCode], ffis: &mut [Stub], pc: usize) -> Result<usize, Error> {
+    fn execute(
+        &mut self,
+        ops: &[OpCode],
+        ffis: &mut [Stub],
+        syms: &mut BTreeMap<Box<str>, u32>,
+        pc: usize,
+    ) -> Result<usize, Error> {
         //
         // Execute the opcode.
         //
-        match ops[pc] {
+        match ops[pc].clone() {
             //
             // Function application.
             //
@@ -329,14 +341,14 @@ impl VirtualMachine {
             //
             OpCode::Car => {
                 let result = match self.stack.pop() {
-                    Value::Pair(value, _) => value.as_ref().clone(),
+                    Value::Pair(cell) => cell.car().clone(),
                     _ => Immediate::Nil.into(),
                 };
                 self.stack.push(result);
             }
             OpCode::Cdr => {
                 let result = match self.stack.pop() {
-                    Value::Pair(_, value) => value.as_ref().clone(),
+                    Value::Pair(cell) => cell.cdr().clone(),
                     _ => Immediate::Nil.into(),
                 };
                 self.stack.push(result);
@@ -350,7 +362,7 @@ impl VirtualMachine {
             },
             OpCode::Cons => {
                 let (a, b) = (self.stack.pop(), self.stack.pop());
-                let value = Value::Pair(a.into(), b.into());
+                let value = Value::Pair(Cell::new(a, b).into());
                 self.stack.push(value);
             }
             //
@@ -399,28 +411,27 @@ impl VirtualMachine {
                         v.iter()
                             .rev()
                             .fold(Value::Immediate(Immediate::Nil), |acc, v| {
-                                Value::Pair(
-                                    Value::Immediate(Immediate::Char(*v)).into(),
-                                    acc.into(),
-                                )
+                                let car = Value::Immediate(Immediate::Char(*v));
+                                Value::Pair(Cell::new(car, acc).into())
                             })
                     }
                     Value::String(v) => (&v[..v.len() - 1]).iter().rev().fold(
                         Value::Immediate(Immediate::Nil),
                         |acc, v| {
-                            Value::Pair(Value::Immediate(Immediate::Char(*v)).into(), acc.into())
+                            let car = Value::Immediate(Immediate::Char(*v));
+                            Value::Pair(Cell::new(car, acc).into())
                         },
                     ),
                     Value::Immediate(Immediate::Symbol(v)) => {
-                        let pos = v.iter().position(|v| *v == 0).unwrap_or(v.len());
-                        v[..pos]
+                        let (sym, _) = syms
                             .iter()
+                            .find(|(_, i)| **i == v)
+                            .ok_or(Error::SymbolNotFound)?;
+                        sym.bytes()
                             .rev()
                             .fold(Value::Immediate(Immediate::Nil), |acc, v| {
-                                Value::Pair(
-                                    Value::Immediate(Immediate::Char(*v)).into(),
-                                    acc.into(),
-                                )
+                                let car = Value::Immediate(Immediate::Char(v));
+                                Value::Pair(Cell::new(car, acc).into())
                             })
                     }
                     _ => Value::Immediate(Immediate::Nil),
@@ -455,14 +466,49 @@ impl VirtualMachine {
             }
             OpCode::Sym => {
                 let value = match self.stack.pop() {
-                    Value::String(bytes) => {
-                        if bytes.len() > 15 {
-                            Value::Immediate(Immediate::Nil)
-                        } else {
-                            let mut raw = [0; 15];
-                            raw[0..bytes.len()].copy_from_slice(&bytes);
-                            Value::Immediate(Immediate::Symbol(raw))
-                        }
+                    v @ Value::Pair(..) => {
+                        //
+                        // Collect the character elements of the list.
+                        //
+                        let bytes: Vec<_> = v
+                            .iter()
+                            .filter_map(|v| match v {
+                                Value::Immediate(Immediate::Char(v)) => Some(*v),
+                                _ => None,
+                            })
+                            .collect();
+                        //
+                        // Convert to string.
+                        //
+                        let key = String::from_utf8_lossy(&bytes).to_string().into_boxed_str();
+                        //
+                        // Check the symbols.
+                        //
+                        let len = syms.len();
+                        let idx = syms.entry(key).or_insert(len as u32);
+                        //
+                        // Done.
+                        //
+                        Value::Immediate(Immediate::Symbol(*idx))
+                    }
+                    Value::String(v) => {
+                        //
+                        // Trim the null terminator.
+                        //
+                        let bytes = &v[..v.len() - 1];
+                        //
+                        // Convert to string.
+                        //
+                        let key = String::from_utf8_lossy(&bytes).to_string().into_boxed_str();
+                        //
+                        // Check the symbols.
+                        //
+                        let len = syms.len();
+                        let idx = syms.entry(key).or_insert(len as u32);
+                        //
+                        // Done.
+                        //
+                        Value::Immediate(Immediate::Symbol(*idx))
                     }
                     _ => Value::Immediate(Immediate::Nil),
                 };

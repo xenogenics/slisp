@@ -479,6 +479,7 @@ pub enum Value {
     Char(u8),
     Number(i64),
     String(Box<str>),
+    Symbol(Box<str>),
     Wildcard,
 }
 
@@ -491,8 +492,9 @@ impl TryFrom<Rc<Atom>> for Value {
             Atom::True(_) => Ok(Self::True),
             Atom::Char(_, v) => Ok(Self::Char(*v)),
             Atom::Number(_, v) => Ok(Self::Number(*v)),
+            Atom::Pair(..) => Err(Error::ExpectedValue(atom.span())),
             Atom::String(_, v) => Ok(Self::String(v.clone())),
-            Atom::Pair(..) | Atom::Symbol(..) => Err(Error::ExpectedValue(atom.span())),
+            Atom::Symbol(_, v) => Ok(Self::Symbol(v.clone())),
             Atom::Wildcard(_) => Ok(Self::Wildcard),
         }
     }
@@ -515,7 +517,6 @@ pub enum CallSite {
 #[derive(Clone, Debug)]
 pub enum Backquote {
     Pair(Box<Backquote>, Box<Backquote>),
-    Symbol(Box<str>),
     Unquote(Box<Statement>),
     UnquoteSplice(Box<Statement>),
     Value(Value),
@@ -543,7 +544,6 @@ impl Backquote {
                 let cdr = Self::from_unquote(cdr.clone(), macros)?;
                 Ok(Self::Pair(car.into(), cdr.into()))
             }
-            Atom::Symbol(_, v) => Ok(Self::Symbol(v.clone())),
             _ => value.try_into().map(Self::Value),
         }
     }
@@ -595,7 +595,6 @@ impl<'a> std::iter::Iterator for BackquoteIterator<'a> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Quote {
     Pair(Box<Quote>, Box<Quote>),
-    Symbol(Box<str>),
     Value(Value),
 }
 
@@ -615,7 +614,6 @@ impl TryFrom<Rc<Atom>> for Quote {
                 let cdr = Self::try_from(cdr.clone())?;
                 Ok(Self::Pair(car.into(), cdr.into()))
             }
-            Atom::Symbol(_, v) => Ok(Self::Symbol(v.clone())),
             _ => value.try_into().map(Self::Value),
         }
     }

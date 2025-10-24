@@ -1,4 +1,4 @@
-use std::{ops::Add, rc::Rc, str::Chars};
+use std::{collections::BTreeMap, ops::Add, rc::Rc, str::Chars};
 
 use crate::{error::Error, opcodes, vm};
 
@@ -286,19 +286,22 @@ impl std::iter::Iterator for AtomIterator {
 //
 //
 
-impl TryFrom<opcodes::Immediate> for Rc<Atom> {
-    type Error = Error;
-
-    fn try_from(value: opcodes::Immediate) -> Result<Self, Self::Error> {
+impl Atom {
+    pub fn from_immediate(
+        value: opcodes::Immediate,
+        syms: &BTreeMap<Box<str>, u32>,
+    ) -> Result<Rc<Self>, Error> {
         match value {
             opcodes::Immediate::Nil => Ok(Atom::Nil(Span::None).into()),
             opcodes::Immediate::True => Ok(Atom::True(Span::None).into()),
             opcodes::Immediate::Char(v) => Ok(Atom::Char(Span::None, v).into()),
             opcodes::Immediate::Number(v) => Ok(Atom::Number(Span::None, v).into()),
             opcodes::Immediate::Symbol(v) => {
-                let index = v.iter().position(|v| *v == 0).unwrap_or(v.len());
-                let value = String::from_utf8_lossy(&v[0..index]).to_string();
-                Ok(Atom::Symbol(Span::None, value.into_boxed_str()).into())
+                let (sym, _) = syms
+                    .iter()
+                    .find(|(_, i)| **i == v)
+                    .ok_or(Error::SymbolNotFound)?;
+                Ok(Atom::Symbol(Span::None, sym.clone()).into())
             }
             opcodes::Immediate::Wildcard => Ok(Atom::Wildcard(Span::None).into()),
             _ => todo!(),
@@ -310,10 +313,8 @@ impl TryFrom<opcodes::Immediate> for Rc<Atom> {
 // TryFrom<vm::Value>.
 //
 
-impl TryFrom<vm::Value> for Rc<Atom> {
-    type Error = Error;
-
-    fn try_from(value: vm::Value) -> Result<Self, Self::Error> {
+impl Atom {
+    pub fn from_value(value: vm::Value, syms: &BTreeMap<Box<str>, u32>) -> Result<Rc<Self>, Error> {
         match value {
             vm::Value::Bytes(v) => {
                 let value = v
@@ -322,10 +323,10 @@ impl TryFrom<vm::Value> for Rc<Atom> {
                     .fold(Atom::nil(), |acc, v| Atom::cons(Atom::char(*v), acc));
                 Ok(value)
             }
-            vm::Value::Immediate(v) => v.try_into(),
-            vm::Value::Pair(car, cdr) => {
-                let car = car.as_ref().clone().try_into()?;
-                let cdr = cdr.as_ref().clone().try_into()?;
+            vm::Value::Immediate(v) => Self::from_immediate(v, syms),
+            vm::Value::Pair(cell) => {
+                let car = Self::from_value(cell.car().clone(), syms)?;
+                let cdr = Self::from_value(cell.cdr().clone(), syms)?;
                 Ok(Atom::Pair(Span::None, car, cdr).into())
             }
             vm::Value::String(v) => {

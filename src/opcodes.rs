@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{collections::BTreeMap, rc::Rc};
 
 use bincode::{Decode, Encode};
 
@@ -41,7 +41,7 @@ pub enum Immediate {
     Number(i64),
     Extcall(u32),
     Funcall(u32, Arity),
-    Symbol([u8; 15]),
+    Symbol(u32),
     Wildcard,
 }
 
@@ -90,11 +90,7 @@ impl std::fmt::Display for Immediate {
             Immediate::Number(n) => write!(f, "{n}"),
             Immediate::Extcall(v) => write!(f, "#X({v})",),
             Immediate::Funcall(v, arity) => write!(f, "#F({v},{arity})"),
-            Immediate::Symbol(v) => {
-                let len = v.iter().position(|v| *v == 0).unwrap_or(v.len());
-                let sym = unsafe { std::str::from_utf8_unchecked(&v[..len]) };
-                write!(f, "{sym}")
-            }
+            Immediate::Symbol(v) => write!(f, "#S({v})"),
             Immediate::Wildcard => write!(f, "_"),
         }
     }
@@ -112,20 +108,16 @@ impl From<i64> for Immediate {
     }
 }
 
-impl TryFrom<Rc<Atom>> for Immediate {
-    type Error = Error;
-
-    fn try_from(value: Rc<Atom>) -> Result<Self, Self::Error> {
+impl Immediate {
+    pub fn from_atom(value: Rc<Atom>, syms: &BTreeMap<Box<str>, u32>) -> Result<Self, Error> {
         match value.as_ref() {
             Atom::Nil(_) => Ok(Self::Nil),
             Atom::True(_) => Ok(Self::True),
             Atom::Char(_, v) => Ok(Self::Char(*v)),
             Atom::Number(_, v) => Ok(Self::Number(*v)),
             Atom::Symbol(_, v) => {
-                let bytes = v.as_bytes();
-                let mut raw = [0; 15];
-                raw[0..bytes.len()].copy_from_slice(bytes);
-                Ok(Immediate::Symbol(raw))
+                let idx = syms.get(v).ok_or(Error::SymbolNotFound)?;
+                Ok(Immediate::Symbol(*idx))
             }
             Atom::Wildcard(_) => Ok(Self::Wildcard),
             _ => Err(Error::ExpectedImmediate(value.span())),

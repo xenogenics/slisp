@@ -1,11 +1,11 @@
-use std::{io::Read, rc::Rc};
+use std::io::Read;
 
 use clap::{Parser, arg};
 use sl::{
     atom::Atom,
     compiler::{Compiler, CompilerTrait},
     grammar::ListsParser,
-    vm::{RunParameters, VirtualMachine},
+    vm::{RunParameters, Value, VirtualMachine},
 };
 use thiserror::Error;
 
@@ -68,6 +68,7 @@ fn main() -> Result<(), Error> {
     // Generate the bytecode.
     //
     let artifacts = compiler.compile("main")?;
+    let mut symbols = artifacts.symbols().clone();
     //
     // Convert the unprocessed arguments to an atom.
     //
@@ -88,15 +89,16 @@ fn main() -> Result<(), Error> {
     //
     // Push the CLI arguments.
     //
-    vm.push(argv.try_into()?);
+    let value = Value::from_atom(argv, &symbols)?;
+    vm.push(value);
     //
     // Run the binary.
     //
-    let result = vm.run(artifacts)?;
+    let result = vm.run(&artifacts, &mut symbols)?;
     //
-    // Print the stack.
+    // Print the result.
     //
-    let atom: Rc<Atom> = result.try_into()?;
+    let atom = Atom::from_value(result, &symbols)?;
     println!("{atom}");
     //
     // Done.

@@ -2,7 +2,7 @@ use clap::{Parser, arg};
 use sl::{
     atom::Atom,
     compiler::Artifacts,
-    vm::{RunParameters, VirtualMachine},
+    vm::{RunParameters, Value, VirtualMachine},
 };
 use thiserror::Error;
 
@@ -50,6 +50,7 @@ fn main() -> Result<(), Error> {
     //
     let conf = bincode::config::standard();
     let artifacts: Artifacts = bincode::decode_from_std_read(&mut file, conf)?;
+    let mut symbols = artifacts.symbols().clone();
     //
     // Convert the unprocessed arguments to an atom.
     //
@@ -70,15 +71,17 @@ fn main() -> Result<(), Error> {
     //
     // Push the CLI arguments.
     //
-    vm.push(argv.try_into()?);
+    let value = Value::from_atom(argv, &symbols)?;
+    vm.push(value);
     //
     // Run the binary.
     //
-    let result = vm.run(artifacts)?;
+    let result = vm.run(&artifacts, &mut symbols)?;
     //
-    // Print the stack.
+    // Print the result.
     //
-    println!("{:?}", result);
+    let atom = Atom::from_value(result, &symbols)?;
+    println!("{atom}");
     //
     // Done.
     //

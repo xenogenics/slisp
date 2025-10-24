@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{collections::BTreeMap, rc::Rc};
 
 use crate::{atom::Atom, error::Error, opcodes::Immediate};
 
@@ -7,6 +7,27 @@ use crate::{atom::Atom, error::Error, opcodes::Immediate};
 //
 
 pub type Closure = (usize, Box<[Value]>);
+
+//
+// Cell.
+//
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Cell(Value, Value);
+
+impl Cell {
+    pub fn new(a: Value, b: Value) -> Self {
+        Self(a, b)
+    }
+
+    pub fn car(&self) -> &Value {
+        &self.0
+    }
+
+    pub fn cdr(&self) -> &Value {
+        &self.1
+    }
+}
 
 //
 // Value.
@@ -18,14 +39,14 @@ pub enum Value {
     Closure(Rc<Closure>),
     Immediate(Immediate),
     Link(usize),
-    Pair(Box<Value>, Box<Value>),
+    Pair(Rc<Cell>),
     String(Rc<[u8]>),
 }
 
 impl Value {
     pub fn as_immediate(&self) -> Immediate {
         match self {
-            Value::Immediate(v) => *v,
+            Value::Immediate(v) => v.clone(),
             _ => panic!("Expected an immediate value"),
         }
     }
@@ -65,10 +86,13 @@ impl Value {
         }
     }
 
-    pub fn conc(a: Box<Value>, b: Value) -> Value {
-        match *a {
-            Value::Pair(car, cdr) => Self::Pair(car, Self::conc(cdr, b).into()),
-            _ => b.clone(),
+    pub fn conc(a: Value, b: Value) -> Value {
+        match a {
+            Value::Pair(cell) => {
+                let Cell(car, cdr) = cell.as_ref().clone();
+                Self::Pair(Cell(car, Self::conc(cdr, b)).into())
+            }
+            _ => b,
         }
     }
 
@@ -79,12 +103,12 @@ impl Value {
     fn fmt_pair(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Immediate(Immediate::Nil) => Ok(()),
-            Value::Pair(car, cdr) => {
-                if matches!(cdr.as_ref(), Value::Immediate(Immediate::Nil)) {
-                    write!(f, "{car}")
+            Value::Pair(cell) => {
+                if matches!(cell.cdr(), Value::Immediate(Immediate::Nil)) {
+                    write!(f, "{}", cell.car())
                 } else {
-                    write!(f, "{car} ")?;
-                    cdr.fmt_pair(f)
+                    write!(f, "{} ", cell.car())?;
+                    cell.cdr().fmt_pair(f)
                 }
             }
             v => write!(f, ". {v}"),
@@ -124,21 +148,19 @@ impl From<Immediate> for Value {
     }
 }
 
-impl TryFrom<Rc<Atom>> for Value {
-    type Error = Error;
-
-    fn try_from(value: Rc<Atom>) -> Result<Self, Self::Error> {
+impl Value {
+    pub fn from_atom(value: Rc<Atom>, syms: &BTreeMap<Box<str>, u32>) -> Result<Self, Error> {
         match value.as_ref() {
             Atom::Nil(_)
             | Atom::True(_)
             | Atom::Char(..)
             | Atom::Number(..)
             | Atom::Symbol(..)
-            | Atom::Wildcard(_) => Immediate::try_from(value).map(Self::Immediate),
+            | Atom::Wildcard(_) => Immediate::from_atom(value, syms).map(Self::Immediate),
             Atom::Pair(_, car, cdr) => {
-                let car: Self = car.clone().try_into()?;
-                let cdr: Self = cdr.clone().try_into()?;
-                Ok(Self::Pair(car.into(), cdr.into()))
+                let car = Value::from_atom(car.clone(), syms)?;
+                let cdr = Value::from_atom(cdr.clone(), syms)?;
+                Ok(Self::Pair(Cell(car, cdr).into()))
             }
             Atom::String(_, v) => {
                 let mut bytes = v.as_bytes().to_vec();
@@ -164,7 +186,7 @@ impl PartialEq for Value {
             (Value::Closure(a), Value::Closure(b)) => a == b,
             (Value::Immediate(a), Value::Immediate(b)) => a == b,
             (Value::Link(a), Value::Link(b)) => a == b,
-            (Value::Pair(car0, cdr0), Value::Pair(car1, cdr1)) => car0 == car1 && cdr0 == cdr1,
+            (Value::Pair(a), Value::Pair(b)) => a == b,
             (Value::String(a), Value::String(b)) => a == b,
             //
             // Default.
@@ -185,9 +207,9 @@ impl<'a> std::iter::Iterator for ValueIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.0 {
-            Value::Pair(car, cdr) => {
-                let result = car.as_ref();
-                self.0 = cdr.as_ref();
+            Value::Pair(cell) => {
+                let result = cell.car();
+                self.0 = cell.cdr();
                 Some(result)
             }
             _ => None,

@@ -39,13 +39,13 @@ fn main() -> Result<(), Error> {
     //
     // Split the artifacts.
     //
-    let syms = artifacts.symbols();
+    let fns = artifacts.internal_functions();
     let ops = artifacts.opcodes();
     //
     // Dump the binary.
     //
     ops.iter().enumerate().for_each(|(i, op)| {
-        if let Some((e, _, _)) = syms.iter().find(|(_, n, _)| *n == i) {
+        if let Some((e, _, _)) = fns.iter().find(|(_, n, _)| *n == i) {
             println!("{e}:");
         }
         println!("    {i:04} {op:?}");

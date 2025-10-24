@@ -68,6 +68,8 @@ pub enum Error {
     Parse(String),
     #[error("Reserved keyworkd: {0}")]
     ReservedKeyword(Box<str>),
+    #[error("Symbol not found")]
+    SymbolNotFound,
     #[error("Too many arguments")]
     TooManyArguments(Span),
     #[error("Unquote outside backquote context")]

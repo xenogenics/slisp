@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     opcodes::Immediate,
-    vm::{Closure, Value},
+    vm::{Closure, Value, value::Cell},
 };
 
 #[derive(Debug)]
@@ -66,7 +66,7 @@ impl Stack {
             let result = self.0[self.0.len() - n..]
                 .iter()
                 .fold(Value::Immediate(Immediate::Nil), |acc, v| {
-                    Value::Pair(v.clone().into(), acc.into())
+                    Value::Pair(Cell::new(v.clone(), acc).into())
                 });
             //
             // Drop the N element from the stack.

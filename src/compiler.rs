@@ -88,7 +88,7 @@ impl Context {
     ) -> usize {
         let mut argcnt = args.len() + closure.len();
         //
-        // Skip if their is no deconstruction.
+        // Skip if there is no deconstruction.
         //
         if !args.has_deconstructions() {
             return argcnt;
@@ -184,18 +184,21 @@ type Stream = VecDeque<LabelOrOpCode>;
 #[derive(Default, Encode, Decode)]
 pub struct Artifacts {
     extfuns: Vec<(Box<str>, ExternalDefinition)>,
-    symbols: Vec<(Box<str>, usize, Arity)>,
+    intfuns: Vec<(Box<str>, usize, Arity)>,
+    symbols: BTreeMap<Box<str>, u32>,
     opcodes: OpCodes,
 }
 
 impl Artifacts {
     pub fn new(
         extfuns: Vec<(Box<str>, ExternalDefinition)>,
-        symbols: Vec<(Box<str>, usize, Arity)>,
+        intfuns: Vec<(Box<str>, usize, Arity)>,
+        symbols: BTreeMap<Box<str>, u32>,
         opcodes: OpCodes,
     ) -> Self {
         Self {
             extfuns,
+            intfuns,
             symbols,
             opcodes,
         }
@@ -205,7 +208,11 @@ impl Artifacts {
         &self.extfuns
     }
 
-    pub fn symbols(&self) -> &[(Box<str>, usize, Arity)] {
+    pub fn internal_functions(&self) -> &[(Box<str>, usize, Arity)] {
+        &self.intfuns
+    }
+
+    pub fn symbols(&self) -> &BTreeMap<Box<str>, u32> {
         &self.symbols
     }
 
@@ -237,6 +244,7 @@ pub struct Compiler {
     macros: BTreeSet<Box<str>>,
     exfuns: BTreeMap<Box<str>, ExternalDefinition>,
     labels: BTreeMap<Box<str>, usize>,
+    symbls: BTreeMap<Box<str>, u32>,
     lcount: usize,
     ecount: usize,
 }
@@ -285,6 +293,7 @@ impl CompilerTrait for Compiler {
         // Generate the bytecode.
         //
         let artifacts = self.compile(&symbol)?;
+        let mut symbols = artifacts.symbols().clone();
         //
         // Build the virtual machine.
         //
@@ -292,11 +301,11 @@ impl CompilerTrait for Compiler {
         //
         // Run.
         //
-        let result = vm.run(artifacts)?;
+        let result = vm.run(&artifacts, &mut symbols)?;
         //
         // Convert the result into an atom.
         //
-        result.try_into()
+        Atom::from_value(result, &symbols)
     }
 
     fn expand(mut self, expr: Rc<Atom>, params: RunParameters) -> Result<Rc<Atom>, Error> {
@@ -426,7 +435,7 @@ impl CompilerTrait for Compiler {
         //
         // Done.
         //
-        Ok(Artifacts::new(exfuns, defuns, opcodes))
+        Ok(Artifacts::new(exfuns, defuns, self.symbls, opcodes))
     }
 }
 
@@ -542,7 +551,7 @@ impl Compiler {
                     //
                     // Get the name of the module.
                     //
-                    let Quote::Symbol(name) = car.as_ref() else {
+                    let Quote::Value(Value::Symbol(name)) = car.as_ref() else {
                         return Err(Error::ExpectedSymbol(Span::None));
                     };
                     //
@@ -551,13 +560,13 @@ impl Compiler {
                     let items: Vec<_> = cdr
                         .iter()
                         .map(|v| match v {
-                            Quote::Symbol(v) => Ok(v.as_ref()),
+                            Quote::Value(Value::Symbol(v)) => Ok(v.as_ref()),
                             _ => Err(Error::ExpectedSymbol(Span::None)),
                         })
                         .collect::<Result<_, _>>()?;
                     self.load_module(name, Some(&items))
                 }
-                Quote::Symbol(v) => self.load_module(v, None),
+                Quote::Value(Value::Symbol(v)) => self.load_module(v, None),
                 _ => Err(Error::ExpectedPairOrSymbol(Span::None)),
             }
         })
@@ -1427,10 +1436,10 @@ impl Compiler {
             }
             Statement::Prog(_, stmts) => self.compile_statements(ctxt, stmts),
             Statement::Backquote(_, quote) => self.compile_backquote(ctxt, quote),
-            Statement::Quote(_, quote) => Self::compile_quote(ctxt, quote),
+            Statement::Quote(_, quote) => self.compile_quote(ctxt, quote),
             Statement::Symbol(_, symbol) => self.compile_symbol(ctxt, symbol),
             Statement::This(_) => self.compile_this(ctxt),
-            Statement::Value(_, value) => Self::compile_value(ctxt, value),
+            Statement::Value(_, value) => self.compile_value(ctxt, value),
         }
     }
 
@@ -1499,29 +1508,6 @@ impl Compiler {
                 Ok(())
             }
             //
-            // Process symbols.
-            //
-            Backquote::Symbol(v) => {
-                //
-                // Convert the symbol.
-                //
-                let mut symbol = [0_u8; 15];
-                symbol[..v.len()].copy_from_slice(v.as_bytes());
-                //
-                // Push the opcode.
-                //
-                let opcode = OpCode::Psh(Immediate::Symbol(symbol)).into();
-                ctxt.stream.push_back(opcode);
-                //
-                // Update the stack.
-                //
-                ctxt.stackn += 1;
-                //
-                // Done.
-                //
-                Ok(())
-            }
-            //
             // Process unquotes.
             //
             Backquote::Unquote(stmt) | Backquote::UnquoteSplice(stmt) => {
@@ -1530,18 +1516,18 @@ impl Compiler {
             //
             // Process values.
             //
-            Backquote::Value(value) => Self::compile_value(ctxt, value),
+            Backquote::Value(value) => self.compile_value(ctxt, value),
         }
     }
 
-    fn compile_quote(ctxt: &mut Context, quote: &Quote) -> Result<(), Error> {
+    fn compile_quote(&mut self, ctxt: &mut Context, quote: &Quote) -> Result<(), Error> {
         match quote {
             Quote::Pair(car, cdr) => {
                 //
                 // Process car and cdr.
                 //
-                Self::compile_quote(ctxt, cdr.as_ref())?;
-                Self::compile_quote(ctxt, car.as_ref())?;
+                self.compile_quote(ctxt, cdr.as_ref())?;
+                self.compile_quote(ctxt, car.as_ref())?;
                 //
                 // Push cons, consume 2 and producing 1.
                 //
@@ -1559,27 +1545,7 @@ impl Compiler {
                 //
                 Ok(())
             }
-            Quote::Symbol(v) => {
-                //
-                // Convert the symbol.
-                //
-                let mut symbol = [0_u8; 15];
-                symbol[..v.len()].copy_from_slice(v.as_bytes());
-                //
-                // Push the opcode.
-                //
-                let opcode = OpCode::Psh(Immediate::Symbol(symbol)).into();
-                ctxt.stream.push_back(opcode);
-                //
-                // Update the stack.
-                //
-                ctxt.stackn += 1;
-                //
-                // Done.
-                //
-                Ok(())
-            }
-            Quote::Value(value) => Self::compile_value(ctxt, value),
+            Quote::Value(value) => self.compile_value(ctxt, value),
         }
     }
 
@@ -1590,8 +1556,8 @@ impl Compiler {
         let opcode = match ctxt.locals.get(sym).and_then(|v| v.last()) {
             Some(index) => OpCode::Get(ctxt.stackn - *index).into(),
             None if self.consts.contains_key(sym) => {
-                let value = self.consts.get(sym).unwrap();
-                return Self::compile_quote(ctxt, value);
+                let value = self.consts.get(sym).unwrap().clone();
+                return self.compile_quote(ctxt, &value);
             }
             None if self.exfuns.contains_key(sym) => LabelOrOpCode::Extcall(sym.clone()),
             None => LabelOrOpCode::Funcall(sym.clone()),
@@ -1629,14 +1595,14 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_value(ctxt: &mut Context, value: &Value) -> Result<(), Error> {
-        let opcode = Self::value_opcode(ctxt, value);
+    fn compile_value(&mut self, ctxt: &mut Context, value: &Value) -> Result<(), Error> {
+        let opcode = self.value_opcode(ctxt, value);
         ctxt.stream.push_back(opcode);
         ctxt.stackn += 1;
         Ok(())
     }
 
-    fn value_opcode(ctxt: &mut Context, value: &Value) -> LabelOrOpCode {
+    fn value_opcode(&mut self, ctxt: &mut Context, value: &Value) -> LabelOrOpCode {
         match value {
             Value::Nil => OpCode::Psh(Immediate::Nil).into(),
             Value::True => OpCode::Psh(Immediate::True).into(),
@@ -1660,6 +1626,17 @@ impl Compiler {
                 // Create the string.
                 //
                 OpCode::Str.into()
+            }
+            Value::Symbol(v) => {
+                //
+                // Check the symbol table.
+                //
+                let len = self.symbls.len();
+                let idx = self.symbls.entry(v.clone()).or_insert(len as u32);
+                //
+                // Push the symbol.
+                //
+                OpCode::Psh(Immediate::Symbol(*idx)).into()
             }
             Value::Wildcard => OpCode::Psh(Immediate::Wildcard).into(),
         }

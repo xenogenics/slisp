@@ -8,7 +8,7 @@ use sl::{
     atom::Atom,
     compiler::{Artifacts, Compiler, CompilerTrait},
     grammar::{ExpressionParser, ListsParser},
-    vm::{RunParameters, Value, VirtualMachine},
+    vm::{RunParameters, VirtualMachine},
 };
 use strum_macros::EnumString;
 use thiserror::Error;
@@ -224,24 +224,24 @@ fn inspect(compiler: Compiler, name: &str) -> Result<(), sl::error::Error> {
     //
     // Get the entrypoint.
     //
-    let symbols = artifacts.symbols();
+    let intfuns = artifacts.internal_functions();
     let opcodes = artifacts.opcodes();
-    let index = symbols.iter().position(|(v, _, _)| v.as_ref() == name);
+    let fnindex = intfuns.iter().position(|(v, _, _)| v.as_ref() == name);
     //
     // Make sure the index exists.
     //
-    let Some(index) = index else {
+    let Some(index) = fnindex else {
         println!("! symbol not found: {name}");
         return Ok(());
     };
     //
     // Get the opcode boundaries.
     //
-    let begin = symbols[index].1;
-    let end = if index == symbols.len() - 1 {
+    let begin = intfuns[index].1;
+    let end = if index == intfuns.len() - 1 {
         opcodes.len()
     } else {
-        symbols[index + 1].1
+        intfuns[index + 1].1
     };
     //
     // Dump the binary.
@@ -263,7 +263,7 @@ fn eval(
     mut compiler: Compiler,
     expr: Rc<Atom>,
     params: RunParameters,
-) -> Result<Value, sl::error::Error> {
+) -> Result<Rc<Atom>, sl::error::Error> {
     //
     // Wrap the statement into a top-level function.
     //
@@ -285,6 +285,7 @@ fn eval(
     // Generate the bytecode.
     //
     let artifacts = compiler.compile("__repl__")?;
+    let mut symbols = artifacts.symbols().clone();
     //
     // Build the virtual machine.
     //
@@ -292,7 +293,15 @@ fn eval(
     //
     // Run.
     //
-    vm.run(artifacts)
+    let result = vm.run(&artifacts, &mut symbols)?;
+    //
+    // Convert the result.
+    //
+    let atom = Atom::from_value(result, &symbols)?;
+    //
+    // Done.
+    //
+    Ok(atom)
 }
 
 //
